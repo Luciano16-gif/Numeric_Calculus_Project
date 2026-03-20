@@ -7,9 +7,13 @@ import numpy as np
 
 @dataclass
 class SplineResult:
-    x_nodes: np.ndarray
-    y_nodes: np.ndarray
+    parameter_axis: str
+    parameter_nodes: np.ndarray
+    value_nodes: np.ndarray
     second_derivatives: np.ndarray
+    interval_coefficients: np.ndarray
+    dense_parameter: np.ndarray
+    dense_values: np.ndarray
     dense_x: np.ndarray
     dense_y: np.ndarray
 
@@ -101,24 +105,69 @@ def evaluate_spline(
     )
 
 
+def piecewise_cubic_coefficients(
+    x_nodes: np.ndarray,
+    y_nodes: np.ndarray,
+    second_derivatives: np.ndarray,
+) -> np.ndarray:
+    x_nodes = np.asarray(x_nodes, dtype=np.float64)
+    y_nodes = np.asarray(y_nodes, dtype=np.float64)
+    second_derivatives = np.asarray(second_derivatives, dtype=np.float64)
+
+    h_values = np.diff(x_nodes)
+    a_values = y_nodes[:-1]
+    b_values = (
+        (y_nodes[1:] - y_nodes[:-1]) / h_values
+        - h_values * (2.0 * second_derivatives[:-1] + second_derivatives[1:]) / 6.0
+    )
+    c_values = second_derivatives[:-1] / 2.0
+    d_values = (second_derivatives[1:] - second_derivatives[:-1]) / (6.0 * h_values)
+
+    return np.column_stack(
+        (
+            x_nodes[:-1],
+            x_nodes[1:],
+            a_values,
+            b_values,
+            c_values,
+            d_values,
+        )
+    )
+
+
 def fit_natural_cubic_spline(
     x_values: np.ndarray,
     y_values: np.ndarray,
     samples_per_pixel: float = 3.0,
+    parameter_axis: str = "x",
 ) -> SplineResult:
     x_values = np.asarray(x_values, dtype=np.float64)
     y_values = np.asarray(y_values, dtype=np.float64)
 
     second_derivatives = natural_cubic_second_derivatives(x_values, y_values)
+    interval_coefficients = piecewise_cubic_coefficients(x_values, y_values, second_derivatives)
     x_span = x_values[-1] - x_values[0]
     dense_count = max(500, int(x_span * samples_per_pixel), x_values.size * 30)
-    dense_x = np.linspace(x_values[0], x_values[-1], dense_count)
-    dense_y = evaluate_spline(x_values, y_values, second_derivatives, dense_x)
+    dense_parameter = np.linspace(x_values[0], x_values[-1], dense_count)
+    dense_values = evaluate_spline(x_values, y_values, second_derivatives, dense_parameter)
+
+    if parameter_axis == "x":
+        dense_x = dense_parameter
+        dense_y = dense_values
+    elif parameter_axis == "y":
+        dense_x = dense_values
+        dense_y = dense_parameter
+    else:
+        raise ValueError("parameter_axis debe ser 'x' o 'y'.")
 
     return SplineResult(
-        x_nodes=x_values,
-        y_nodes=y_values,
+        parameter_axis=parameter_axis,
+        parameter_nodes=x_values,
+        value_nodes=y_values,
         second_derivatives=second_derivatives,
+        interval_coefficients=interval_coefficients,
+        dense_parameter=dense_parameter,
+        dense_values=dense_values,
         dense_x=dense_x,
         dense_y=dense_y,
     )
